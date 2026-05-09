@@ -89,15 +89,20 @@ const AdminAnnouncements = () => {
 
   // Result History Date Filter
   const [historyDate, setHistoryDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dispatchDate, setDispatchDate] = useState(new Date().toISOString().split('T')[0]);
 
   // 4-Column Result Entry
   const [resultDigits, setResultDigits] = useState({ X: '', A: '', B: '', C: '' });
 
   const drawAssignments = MARKET_GROUPS;
 
-  const isDrawFinished = (timeStr) => {
+  const isDrawFinished = (timeStr, targetDate) => {
     if (!timeStr) return false;
     const now = new Date();
+    
+    // If targetDate is in the past, draw is definitely finished
+    if (targetDate < now.toISOString().split('T')[0]) return true;
+    
     const parts = timeStr.match(/(\d+)[.:](\d+)\s*(AM|PM)/);
     if (!parts) return true;
     let h = parseInt(parts[1]);
@@ -156,7 +161,7 @@ const AdminAnnouncements = () => {
         dataStore,
         totalQty: tickets.reduce((sum, t) => sum + t.qty, 0),
         totalValue: tickets.reduce((sum, t) => sum + (t.qty * t.price), 0),
-        ready: isDrawFinished(s)
+        ready: isDrawFinished(s, monitorDate)
       };
       feed[s] = breakdown;
     });
@@ -172,20 +177,19 @@ const AdminAnnouncements = () => {
 
   const handleDeclareResult = () => {
     const { X, A, B, C } = resultDigits;
-    const today = new Date().toISOString().split('T')[0];
     
     if (X === '' || A === '' || B === '' || C === '') return alert("Please enter all result digits.");
     if (!prizeScheme) return alert("Prize scheme not loaded. Please wait.");
 
     addResult({ 
       draw: selectedSlot, 
-      date: today,
+      date: dispatchDate, // Use explicitly selected dispatch date
       brand: getBrandBySlot(selectedSlot), 
       digits: resultDigits, 
       prizes: prizeScheme 
     });
     
-    alert(`RESULT ANNOUNCED: ${X}${A}${B}${C}`);
+    alert(`RESULT ANNOUNCED FOR ${dispatchDate}: ${X}${A}${B}${C}`);
     setWorkflowStep('root');
     setResultDigits({ X: '', A: '', B: '', C: '' });
   };
@@ -411,8 +415,22 @@ const AdminAnnouncements = () => {
           {workflowStep === 'slot' && (
             <div className="animate-in slide-in-from-right-4 space-y-6 bg-white p-8 rounded-[2.5rem] shadow-2xl">
                <div className="flex justify-between items-center pb-6 border-b border-gray-50">
-                  <h3 className="text-lg font-black font-condensed uppercase italic">{marketSelection} Slots</h3>
-                  <button onClick={() => setWorkflowStep('market')} className="text-[10px] font-black uppercase text-gray-300">Back</button>
+                  <div>
+                    <h3 className="text-lg font-black font-condensed uppercase italic">{marketSelection} Slots</h3>
+                    <p className="text-[8px] font-black uppercase text-gray-400 italic">Declare results for specific dates</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input 
+                      type="date" 
+                      value={dispatchDate}
+                      onChange={(e) => {
+                        setDispatchDate(e.target.value);
+                        setMonitorDate(e.target.value); // Sync monitor date to see correct stats
+                      }}
+                      className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-1.5 text-[10px] font-black uppercase outline-none focus:border-red-500"
+                    />
+                    <button onClick={() => setWorkflowStep('market')} className="text-[10px] font-black uppercase text-gray-300">Back</button>
+                  </div>
                </div>
                <div className="grid grid-cols-1 gap-3">
                   {drawAssignments[marketSelection].map(slot => {
@@ -440,9 +458,22 @@ const AdminAnnouncements = () => {
                      <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center text-red-500"><Zap size={24} /></div>
                      <div><p className="text-[9px] font-black uppercase opacity-60 tracking-[.2em]">{marketSelection}</p><h2 className="text-2xl font-black font-condensed italic">{selectedSlot}</h2></div>
                   </div>
-                  <button onClick={() => setWorkflowStep('slot')} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-red-500 transition-colors"><Trash2 size={18} /></button>
+                  <div className="flex flex-col items-end">
+                     <p className="text-[7px] font-black uppercase text-red-500 tracking-widest mb-1">Target Draw Date</p>
+                     <input 
+                        type="date" 
+                        value={dispatchDate} 
+                        onChange={(e) => setDispatchDate(e.target.value)}
+                        className="bg-white/10 border border-white/20 rounded-lg px-3 py-1 text-xs font-black outline-none focus:border-red-500"
+                     />
+                  </div>
+                  <button onClick={() => setWorkflowStep('slot')} className="ml-4 w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-red-500 transition-colors"><Trash2 size={18} /></button>
                </div>
                <div className="bg-white rounded-[2.5rem] p-8 shadow-2xl border border-gray-100 space-y-8">
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3">
+                     <AlertCircle className="text-amber-600" size={20} />
+                     <p className="text-[9px] font-black uppercase text-amber-900 tracking-tight italic">Warning: Results will be synced with tickets purchased on {dispatchDate}. Ensure this is correct.</p>
+                  </div>
                     <div className="grid grid-cols-4 gap-4">
                         {['X', 'A', 'B', 'C'].map(col => (
                         <div key={col} className="space-y-2 text-center">

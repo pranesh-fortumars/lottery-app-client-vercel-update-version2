@@ -1,247 +1,292 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import PageWrapper from '../components/PageWrapper';
-import { Ticket, Clock, Calendar, CheckCircle2, ChevronRight, ShoppingBag, Receipt, Printer, FileText, Trophy, Coins, Sparkles, RefreshCw } from 'lucide-react';
+import { Calendar, RefreshCw, Search, Trophy, Receipt, Download, Printer, ShieldCheck, Clock, Zap } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 const MyTickets = () => {
-  const { purchasedTickets, refreshTickets, loading } = useCart();
+  const { purchasedTickets, refreshTickets, loading, declaredResults } = useCart();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
-  // Group tickets by purchaseId (Transaction ID)
-  const groupedTransactions = useMemo(() => {
-    const groups = {};
-    if (!purchasedTickets) return [];
+  // Filter State - Initialized to TODAY
+  const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
+  const [showAll, setShowAll] = useState(false);
+
+  // Auto-refresh when results change
+  React.useEffect(() => {
+    if (declaredResults.length > 0) {
+      const timer = setTimeout(() => refreshTickets(), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [declaredResults]);
+
+  // Helper to find declared result for a ticket
+  const getDeclaredResult = (date, draw) => {
+     if (!declaredResults) return '-';
+     const result = declaredResults.find(r => r.date === date && r.draw === draw);
+     return result ? result.number : '-';
+  };
+
+  // Advanced Grouping with Strict Date Filtering
+  const transactionGroups = useMemo(() => {
+    if (!purchasedTickets || !Array.isArray(purchasedTickets)) return [];
     
-    purchasedTickets.forEach(ticket => {
-      // Use purchaseId as group key, fallback to ticket id if missing
-      const id = ticket.purchaseId || `T-${ticket.id}`;
-      if (!groups[id]) {
-        groups[id] = {
-          id: id,
-          status: ticket.status || 'Active',
-          date: ticket.purchaseDate || 'Today',
-          time: ticket.purchaseTime || 'Just Now',
-          market: ticket.title?.includes('DEAR') ? 'Dear' : 'Kerala',
-          slot: ticket.title?.split('-')[1]?.split('(')[0]?.trim() || 'General',
-          tickets: []
-        };
-      }
-      groups[id].tickets.push(ticket);
+    // 1. Strict filtering by date or full history
+    const baseList = showAll 
+      ? [...purchasedTickets] 
+      : purchasedTickets.filter(t => {
+          // Normalize both dates to ensure exact string match (YYYY-MM-DD)
+          const tDate = t.purchaseDate ? String(t.purchaseDate).trim() : '';
+          return tDate === filterDate;
+        });
+
+    const groups = {};
+    baseList.forEach(t => {
+       const pid = t.purchaseId || 'UNTRACKED';
+       if (!groups[pid]) {
+          groups[pid] = {
+             id: pid,
+             date: t.purchaseDate,
+             time: t.purchaseTime || '00:00',
+             drawSlots: {},
+             totalWin: 0,
+             brand: (t.title || 'LOTTERY').split('-')[0].trim().toUpperCase()
+          };
+       }
+       
+       const slotKey = t.draw || 'N/A';
+       if (!groups[pid].drawSlots[slotKey]) {
+          groups[pid].drawSlots[slotKey] = {
+             slot: slotKey.replace(/[\[\]]/g, ''),
+             declaredNum: getDeclaredResult(t.purchaseDate, t.draw),
+             tickets: []
+          };
+       }
+       
+       groups[pid].drawSlots[slotKey].tickets.push(t);
+       
+       if (t.status === 'Won') {
+          const winAmt = parseInt(String(t.prize || "0").replace(/[^\d]/g, '')) || 0;
+          groups[pid].totalWin += winAmt;
+       }
     });
-    return Object.values(groups);
-  }, [purchasedTickets]);
+
+    // Sort: Newest transactions first
+    return Object.values(groups).sort((a, b) => {
+       if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
+       return String(b.time).localeCompare(String(a.time));
+    });
+  }, [purchasedTickets, filterDate, showAll, declaredResults]);
+
+  const resultCount = useMemo(() => transactionGroups.length, [transactionGroups]);
 
   return (
-    <PageWrapper title="PURCHASE HISTORY">
-      <div className="bg-[#f8fbff] min-h-screen p-4 pb-24 space-y-8">
+    <PageWrapper title="RESULT DECLARATION">
+      <div className="bg-[#f0f0f0] min-h-screen p-2 sm:p-4 pb-24 space-y-4 font-sans">
         
-        <div className="flex justify-between items-center px-4">
-           <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Live Ticket Archive</h2>
-           <button 
-            onClick={refreshTickets}
-            disabled={loading}
-            className="flex items-center gap-2 text-[#ff0000] font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all disabled:opacity-30"
-           >
-              {loading ? 'Updating...' : 'Refresh List'} <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+        {/* --- DYNAMIC FILTER BAR --- */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-3 flex items-center justify-between gap-2 max-w-4xl mx-auto">
+           <div className="flex items-center gap-2 bg-gray-50 p-2 px-3 rounded-xl flex-grow max-w-[220px] transition-all focus-within:ring-2 focus-within:ring-[#ff0000]/10 border border-gray-100">
+              <Calendar size={14} className="text-[#ff0000]" />
+              <div className="flex flex-col">
+                 <span className="text-[6px] font-black text-gray-400 uppercase tracking-widest leading-none mb-0.5">Filter Date</span>
+                 <input 
+                   type="date" 
+                   value={filterDate}
+                   onChange={(e) => {
+                     setFilterDate(e.target.value);
+                     setShowAll(false); // Switch to specific date mode
+                   }}
+                   className="bg-transparent border-none text-[10px] font-black uppercase outline-none p-0 text-gray-700 w-full cursor-pointer"
+                 />
+              </div>
+           </div>
+           <div className="flex gap-2 items-center">
+              <div className="hidden sm:flex flex-col items-end mr-2">
+                 <p className="text-[7px] font-black text-gray-300 uppercase tracking-widest leading-none italic">Results Found</p>
+                 <p className="text-[14px] font-black font-condensed italic text-[#ff0000] leading-none">{resultCount}</p>
+              </div>
+              <button 
+               onClick={() => setShowAll(!showAll)}
+               className={`px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${showAll ? 'bg-gray-900 text-white shadow-lg shadow-gray-200' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
+              >
+                 {showAll ? 'SHOW ALL' : 'HISTORY'}
+              </button>
+              <button 
+                onClick={refreshTickets} 
+                disabled={loading}
+                className="p-2 bg-gray-900 text-white rounded-xl active:scale-95 transition-all disabled:opacity-30"
+              >
+                 <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+              </button>
+           </div>
+        </div>
+
+        {transactionGroups.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 text-center space-y-6">
+             <div className="relative">
+                <Receipt size={64} className="text-gray-100" />
+                <Search size={24} className="absolute -bottom-2 -right-2 text-gray-200" />
+             </div>
+             <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-300 italic">No matches for {showAll ? 'all history' : filterDate}</p>
+                <button onClick={() => setShowAll(true)} className="text-[8px] font-black text-[#ff0000] uppercase tracking-widest underline decoration-2 underline-offset-4">View All Records</button>
+             </div>
+          </div>
+        ) : (
+          <div className="space-y-12 max-w-4xl mx-auto">
+             {/* Small mobile counter */}
+             <div className="sm:hidden px-4 flex justify-between items-center opacity-50">
+                <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Filtering: {showAll ? 'Full History' : filterDate}</p>
+                <p className="text-[8px] font-black uppercase tracking-widest text-gray-400">Records: {resultCount}</p>
+             </div>
+            {transactionGroups.map((group) => (
+               <div key={group.id} className="bg-white rounded-3xl shadow-2xl border-2 border-[#ff0000] overflow-hidden">
+                  
+                  {/* --- TRANSACTION PARENT HEADER --- */}
+                  <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                     <div>
+                        <p className="text-[8px] font-black text-[#ff0000] uppercase tracking-[0.3em] italic">Transaction Instance</p>
+                        <h4 className="text-[12px] font-black font-condensed italic text-gray-900">ID: {group.id}</h4>
+                     </div>
+                     <div className="text-right">
+                        <p className="text-[11px] font-black font-condensed text-gray-950 italic">{group.date} | {group.time}</p>
+                     </div>
+                  </div>
+
+                  {/* --- DRAW SLOT GROUPS --- */}
+                  {Object.values(group.drawSlots).map((slotGroup, sIdx) => (
+                     <div key={sIdx} className="border-b-2 border-red-50 last:border-b-0">
+                        
+                        {/* --- SLOT HEADER: COMPACT --- */}
+                        <div className="bg-white p-3 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-gray-100">
+                           <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 bg-gray-900 rounded-xl flex items-center justify-center text-white shadow-md">
+                                 <Clock size={16} className="text-amber-400" />
+                              </div>
+                              <div>
+                                 <h3 className="text-sm font-black font-condensed italic uppercase text-gray-950 leading-none">
+                                    {group.brand} <span className="mx-1 text-gray-300">|</span> {slotGroup.slot}
+                                 </h3>
+                                 <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-[7px] font-black uppercase tracking-widest text-[#ff0000] animate-pulse italic">Result Declared</span>
+                                    <div className="w-0.5 h-0.5 bg-gray-300 rounded-full"></div>
+                                    <span className="text-[7px] font-bold text-gray-300 uppercase tracking-widest italic">Archived</span>
+                                 </div>
+                              </div>
+                           </div>
+                           
+                           {/* --- MINI DECLARED RESULT --- */}
+                           <div className="flex items-center gap-3">
+                              <p className="text-[7px] font-black text-gray-400 uppercase tracking-widest italic">Result:</p>
+                              <div className="flex gap-1">
+                                 {slotGroup.declaredNum.split('').map((n, ni) => (
+                                    <div key={ni} className="w-7 h-9 bg-white border-2 border-[#ff0000] rounded-lg flex items-center justify-center text-gray-950 font-black text-sm font-condensed italic">
+                                       {n}
+                                    </div>
+                                 ))}
+                                 {slotGroup.declaredNum === '-' && <span className="text-[8px] font-black text-gray-300 italic">PENDING</span>}
+                              </div>
+                           </div>
+                        </div>
+
+                        {/* --- TICKET SPECIFIC TABLE: ULTRA COMPACT --- */}
+                        <div className="overflow-x-auto scrollbar-hide">
+                           <table className="w-full text-center border-collapse table-fixed min-w-[320px]">
+                              <thead>
+                                 <tr className="bg-gray-50/30 border-y-2 border-[#ff0000]">
+                                    <th className="w-[10%] py-1.5 border-r-2 border-[#ff0000] text-[7px] font-black uppercase text-gray-950 font-condensed italic">TYP</th>
+                                    <th className="w-[14%] py-1.5 border-r-2 border-[#ff0000] text-[7px] font-black uppercase text-gray-950 font-condensed italic">BRD</th>
+                                    <th className="w-[30%] py-1.5 border-r-2 border-[#ff0000] text-[7px] font-black uppercase text-gray-950 font-condensed italic">NUMBER</th>
+                                    <th className="w-[8%] py-1.5 border-r-2 border-[#ff0000] text-[7px] font-black uppercase text-gray-950 font-condensed italic">Q</th>
+                                    <th className="w-[15%] py-1.5 border-r-2 border-[#ff0000] text-[7px] font-black uppercase text-gray-950 font-condensed italic">TIER</th>
+                                    <th className="w-[23%] py-1.5 text-[7px] font-black uppercase text-gray-950 font-condensed italic">PRIZE</th>
+                                 </tr>
+                              </thead>
+                              <tbody>
+                                 {slotGroup.tickets.map((t, tIdx) => {
+                                    const isWin = t.status === 'Won';
+                                    return (
+                                       <tr key={tIdx} className={`group ${isWin ? 'bg-emerald-50/20' : ''}`}>
+                                          <td className="py-1.5 px-0 border-r-2 border-b-2 border-[#ff0000] text-[8px] font-black text-gray-950 uppercase italic tracking-tighter leading-none text-center">
+                                             {t.type}
+                                          </td>
+                                          <td className="py-1.5 px-0 border-r-2 border-b-2 border-[#ff0000] text-[11px] font-black font-condensed italic text-gray-950 leading-none text-center">
+                                             {t.pos}
+                                          </td>
+                                          <td className="py-1.5 px-0 border-r-2 border-b-2 border-[#ff0000] text-base font-black font-condensed italic text-gray-950 tracking-normal leading-none text-center">
+                                             {t.num}
+                                          </td>
+                                          <td className="py-1.5 px-0 border-r-2 border-b-2 border-[#ff0000] text-[11px] font-black font-condensed italic text-[#ff0000] leading-none text-center">
+                                             {t.qty}
+                                          </td>
+                                          <td className="py-1.5 px-0 border-r-2 border-b-2 border-[#ff0000] text-[7px] font-bold text-gray-500 italic leading-none text-center">
+                                             {t.price}
+                                          </td>
+                                          <td className="py-1.5 px-0.5 border-b-2 border-[#ff0000] text-right align-middle">
+                                             <div className="flex flex-col items-end justify-center leading-none">
+                                                {isWin ? (
+                                                   <p className="text-[11px] font-black text-emerald-600 font-condensed italic">₹{String(t.prize || "0").replace(/[^\d]/g, '')}</p>
+                                                ) : (
+                                                   <span className="text-[6px] font-black text-gray-100 uppercase tracking-widest italic">{t.status || 'Active'}</span>
+                                                )}
+                                             </div>
+                                          </td>
+                                       </tr>
+                                    );
+                                 })}
+                              </tbody>
+                           </table>
+                        </div>
+                     </div>
+                  ))}
+
+                  {/* --- COMPACT TRANSACTION FOOTER --- */}
+                  <div className="bg-gray-950 p-4 text-white border-t-4 border-[#ff0000]">
+                     <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-3 opacity-30">
+                           <ShieldCheck size={16} className="text-amber-400" />
+                           <p className="text-[7px] font-black uppercase tracking-[0.2em] italic">Verified Result Ledger</p>
+                        </div>
+                        <div className="text-right">
+                           <p className="text-[8px] font-black uppercase text-amber-400 tracking-[0.2em] italic leading-none mb-1">Total Winnings</p>
+                           <p className="text-2xl font-black font-condensed italic text-amber-400 tracking-tighter leading-none">
+                              ₹ {group.totalWin.toLocaleString()}
+                           </p>
+                        </div>
+                     </div>
+                  </div>
+                </div>
+             ))}
+           </div>
+         )}
+
+        {/* --- GLOBAL PRINT/SAVE --- */}
+        <div className="flex justify-center gap-6 py-10 opacity-30 hover:opacity-100 transition-opacity">
+           <button className="flex flex-col items-center gap-2 active:scale-95 transition-all">
+              <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-gray-950 shadow-xl border border-gray-100"><Printer size={20} /></div>
+              <span className="text-[8px] font-black uppercase tracking-widest">Print Result</span>
+           </button>
+           <button className="flex flex-col items-center gap-2 active:scale-95 transition-all">
+              <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-gray-950 shadow-xl border border-gray-100"><Download size={20} /></div>
+              <span className="text-[8px] font-black uppercase tracking-widest">Save Ledger</span>
            </button>
         </div>
 
-        {groupedTransactions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
-            <div className="w-20 h-20 bg-white rounded-[2.5rem] flex items-center justify-center text-gray-200 border-2 border-gray-100 shadow-xl">
-              <Receipt size={40} />
-            </div>
-            <div>
-              <h3 className="text-xl font-black text-gray-400 uppercase tracking-tighter italic">No History Found</h3>
-              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-2 px-10">Your purchase archive is currently empty.</p>
-            </div>
-            <button 
-              onClick={() => navigate('/home')}
-              className="bg-[#ff0000] text-white px-8 py-3 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl shadow-red-100 active:scale-95 transition-all"
-            >
-              Explore Markets
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-10">
-            {groupedTransactions.map((group) => {
-              const totalItems = group.tickets.length;
-              const grandQty = group.tickets.reduce((sum, t) => sum + t.qty, 0);
-              const totalAmount = group.tickets.reduce((sum, t) => sum + (t.qty * t.price), 0);
-              
-              const winningTickets = group.tickets.filter(t => t.status === 'Won');
-              const isWinner = winningTickets.length > 0;
-              const totalWinningPrize = winningTickets.reduce((sum, t) => {
-                 const prizeMatch = t.prize.replace(/[^\d]/g, '');
-                 return sum + (parseInt(prizeMatch) || 0);
-              }, 0);
-
-              const isAllClosed = group.tickets.every(t => t.status === 'Closed' || t.status === 'Won');
-
-              return (
-                <div key={group.id} className={`bg-white rounded-[2rem] shadow-2xl border-2 overflow-hidden animate-in slide-in-from-bottom-4 duration-500 transition-all ${isWinner ? 'border-amber-400' : 'border-red-50'}`}>
-                  
-                  {/* --- WINNER BANNER (Dynamic Reveal) --- */}
-                  {isWinner && (
-                    <div className="bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-6 py-4 flex items-center justify-between text-white shadow-lg overflow-hidden relative">
-                       <div className="absolute top-0 right-[-20px] opacity-20"><Trophy size={80} /></div>
-                       <div className="flex items-center gap-4 z-10">
-                          <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center animate-pulse"><Sparkles size={20} /></div>
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest opacity-80 italic">Congratulations!</p>
-                            <h4 className="text-xl font-black font-condensed italic tracking-tighter uppercase leading-none">Jackpot Winning Ticket</h4>
-                          </div>
-                       </div>
-                       <div className="text-right z-10">
-                          <p className="text-[9px] font-black uppercase italic mb-1">Draw Prize</p>
-                          <p className="text-2xl font-black font-condensed italic tracking-tighter">₹ {totalWinningPrize.toLocaleString()}</p>
-                       </div>
-                    </div>
-                  )}
-
-                  {/* --- Header Match to Image --- */}
-                  <div className="bg-white p-5 border-b-[1.5px] border-red-100 flex justify-between items-center bg-gradient-to-r from-red-50/20 to-white">
-                     <div className="flex flex-col">
-                        <span className="text-[9px] font-black uppercase text-red-500 tracking-widest opacity-60 italic mb-1">Transaction ID: {group.id}</span>
-                        <div className="flex items-center gap-2">
-                           <h3 className="text-xl font-black font-condensed italic uppercase leading-none">{group.market} | {group.slot}</h3>
-                        </div>
-                     </div>
-                     <div className="text-right">
-                        <div className="text-[10px] font-black text-gray-900 border-b border-gray-100 pb-1">{group.date}</div>
-                        <div className="text-[9px] font-bold text-gray-400 mt-1">{group.time}</div>
-                     </div>
-                  </div>
-
-                  {/* --- Table Component (Matching Hand-Drawn Image) --- */}
-                  <div className="p-0">
-                    <table className="w-full text-left border-collapse">
-                       <thead>
-                          <tr className="bg-gray-50/50 border-b border-gray-100">
-                             <th className="px-5 py-3 text-[9px] font-black uppercase text-gray-400 tracking-widest">Item / No</th>
-                             <th className="px-3 py-3 text-[9px] font-black uppercase text-gray-400 tracking-widest text-center">Qty</th>
-                             <th className="px-3 py-3 text-[9px] font-black uppercase text-gray-400 tracking-widest text-center">Rate</th>
-                               <th className="px-5 py-3 text-[9px] font-black uppercase text-gray-400 tracking-widest text-right whitespace-nowrap">Amount / Prize</th>
-                            </tr>
-                         </thead>
-                         <tbody>
-                            {group.tickets.map((t, tIdx) => (
-                              <tr key={tIdx} className={`border-b border-gray-50 last:border-0 group transition-colors ${t.status === 'Won' ? 'bg-amber-50/50 hover:bg-amber-100/50' : 'hover:bg-red-50/30'}`}>
-                                 <td className="px-5 py-4">
-                                    <div className="flex flex-col">
-                                       <span className={`text-[10px] font-black uppercase italic tracking-tighter ${t.status === 'Won' ? 'text-amber-600' : 'text-red-600'}`}>
-                                          {t.type === '1D' ? `${t.pos} (1D)` : t.type === '3D' ? `3D RS ${t.price} ${t.pos}` : `${t.pos} (${t.type})`}
-                                       </span>
-                                       <span className="text-lg font-black font-condensed tracking-widest text-gray-900 mt-0.5">{t.num}</span>
-                                    </div>
-                                 </td>
-                                 <td className="px-3 py-4 text-center font-black text-gray-700 text-sm">{t.qty}</td>
-                                 <td className="px-3 py-4 text-center text-[10px] whitespace-nowrap">
-                                    <span className="text-gray-300 font-bold mr-1">x</span>
-                                    <span className="font-black text-gray-900">₹ {t.price}</span>
-                                  </td>
-                                 <td className="px-5 py-4 text-right">
-                                    <div className="flex flex-col items-end">
-                                       <span className="text-sm font-black text-gray-900 leading-none">₹ {(t.qty * t.price).toLocaleString()}</span>
-                                       
-                                       {t.status === 'Won' ? (
-                                         <div className="mt-1 flex flex-col items-end">
-                                           <span className="text-[12px] font-black text-amber-600 font-condensed italic leading-none">{t.prize || "WON"}</span>
-                                           <span className="text-[7px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500 text-white mt-1">Winner</span>
-                                         </div>
-                                       ) : (
-                                         <span className={`text-[7px] font-black uppercase px-2 py-0.5 rounded-full mt-1 ${
-                                            t.status === 'Active' ? 'bg-blue-500 text-white' : 
-                                            'bg-gray-400 text-white'
-                                         }`}>{t.status}</span>
-                                       )}
-                                    </div>
-                                 </td>
-                              </tr>
-                            ))}
-                         </tbody>
-                       {/* --- Table Footer Match to Image --- */}
-                       <tfoot>
-                          <tr className="bg-gray-900 text-white border-t-4 border-red-600">
-                             <td className="px-5 py-5">
-                                <div className="flex flex-col">
-                                   <span className="text-[7px] font-black uppercase opacity-60 tracking-widest mb-1 italic">Total Items</span>
-                                   <span className="text-xl font-black font-condensed italic">{totalItems}</span>
-                                </div>
-                             </td>
-                             <td className="px-3 py-5 text-center">
-                                <div className="flex flex-col">
-                                   <span className="text-[7px] font-black uppercase opacity-60 tracking-widest mb-1 italic">Grand Qty</span>
-                                   <span className="text-xl font-black font-condensed italic">{grandQty}</span>
-                                </div>
-                             </td>
-                             {(isWinner || isAllClosed) ? (
-                                <td colSpan="2" className="px-5 py-5 text-right">
-                                   <div className="flex justify-between items-end gap-10">
-                                      <div className="flex flex-col items-end">
-                                         <span className="text-[7px] font-black uppercase opacity-60 tracking-widest mb-1 italic">Total Paid</span>
-                                         <span className="text-lg font-black font-condensed italic text-gray-400 line-through">₹ {totalAmount.toLocaleString()}</span>
-                                      </div>
-                                      <div className="flex flex-col items-end">
-                                         <span className="text-[8px] font-black uppercase text-amber-400 tracking-widest mb-1 italic underline decoration-amber-400 underline-offset-4">WINNING PRIZE</span>
-                                         <span className="text-3xl font-black font-condensed italic text-amber-400 tracking-widest leading-none">₹ {totalWinningPrize.toLocaleString()}</span>
-                                      </div>
-                                   </div>
-                                </td>
-                             ) : (
-                                <>
-                                 <td className="px-3 py-5"></td>
-                                 <td className="px-5 py-5 text-right text-red-600">
-                                    <div className="flex flex-col">
-                                       <span className="text-[7px] font-black uppercase opacity-60 tracking-widest mb-1 italic underline decoration-[#ff0000] underline-offset-4">Total Amount</span>
-                                       <span className="text-2xl font-black font-condensed italic text-white tracking-widest">₹ {totalAmount.toLocaleString()}</span>
-                                    </div>
-                                 </td>
-                                </>
-                             )}
-                          </tr>
-                       </tfoot>
-                    </table>
-                  </div>
-                  
-                  {/* --- Official Seals --- */}
-                  <div className="bg-gray-50 px-6 py-3 flex justify-between items-center opacity-30 select-none">
-                     <div className="flex items-center gap-2">
-                        <ShieldCheck size={12} className="text-gray-900" />
-                        <span className="text-[8px] font-black uppercase tracking-[.2em] font-serif italic">Verified Transaction</span>
-                     </div>
-                     <div className="text-[8px] font-bold uppercase tracking-widest">Diamond Hub Official Record</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <div className="flex flex-col items-center gap-5 mt-10">
-           <div className="flex gap-4">
-              <button className="flex flex-col items-center opacity-40 hover:opacity-100 transition-opacity">
-                 <div className="w-10 h-10 bg-white border border-gray-100 rounded-2xl flex items-center justify-center text-gray-900 shadow-xl mb-1"><Printer size={18} /></div>
-                 <span className="text-[8px] font-black uppercase">Print</span>
-              </button>
-              <button className="flex flex-col items-center opacity-40 hover:opacity-100 transition-opacity">
-                 <div className="w-10 h-10 bg-white border border-gray-100 rounded-2xl flex items-center justify-center text-gray-900 shadow-xl mb-1"><FileText size={18} /></div>
-                 <span className="text-[8px] font-black uppercase">PDF</span>
-              </button>
-           </div>
-           <div className="text-center opacity-20">
-              <p className="text-[8px] font-bold text-gray-400 uppercase tracking-[0.5em] font-serif italic">Board Certified Digital Receipt</p>
-           </div>
+        {/* --- NAVIGATION --- */}
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+           <button 
+            onClick={() => navigate('/home')}
+            className="bg-[#ff0000] text-white px-10 py-4 rounded-full font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl shadow-red-500/40 active:scale-95 transition-all flex items-center gap-3 border-4 border-white/20"
+           >
+              <Zap size={16} /> NEW DRAW SESSION
+           </button>
         </div>
       </div>
     </PageWrapper>
   );
 };
-
-// Simple icon component to ensure visibility
-const ShieldCheck = ({ size, className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 .52-.88l7-4a1 1 0 0 1 .96 0l7 4A1 1 0 0 1 20 6z"/><path d="m9 12 2 2 4-4"/></svg>
-);
 
 export default MyTickets;
