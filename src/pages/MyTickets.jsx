@@ -4,6 +4,7 @@ import { Calendar, RefreshCw, Search, Trophy, Receipt, Download, Printer, Shield
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { getBrandBySlot } from '../constants/lotteryConfig';
 
 const MyTickets = () => {
   const { purchasedTickets, refreshTickets, loading, declaredResults } = useCart();
@@ -168,7 +169,7 @@ const MyTickets = () => {
                               </div>
                               <div>
                                  <h3 className="text-sm font-black font-condensed italic uppercase text-gray-950 leading-none">
-                                    {group.brand} <span className="mx-1 text-gray-300">|</span> {slotGroup.slot}
+                                    {getBrandBySlot(slotGroup.slot)} LOTTERY <span className="mx-1 text-gray-300">|</span> {slotGroup.slot}
                                  </h3>
                                  <div className="flex items-center gap-2 mt-0.5">
                                     <span className="text-[7px] font-black uppercase tracking-widest text-[#ff0000] animate-pulse italic">Result Declared</span>
